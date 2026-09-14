@@ -284,3 +284,26 @@ test("an already-aborted signal never opens a browser or a listener", async () =
   );
   assert.equal(opened, false);
 });
+
+test("the authorization request omits include_granted_scopes", async () => {
+  // Incremental authorization is not supported for installed apps, and Google
+  // rejects the consent request when this parameter is present.
+  // https://developers.google.com/identity/protocols/oauth2/native-app
+  let authorizationUrl: URL | undefined;
+
+  await authorizeGoogle(
+    { clientId: "client-id", clientSecret: "client-secret" },
+    {
+      openExternal(value) {
+        authorizationUrl = new URL(value);
+        const state = authorizationUrl.searchParams.get("state");
+        assert.ok(state);
+        void request(callbackUrl(authorizationUrl, { code: "authorization-code", state }));
+      },
+      exchangeCode: async () => "refresh-token",
+    },
+  );
+
+  assert.ok(authorizationUrl);
+  assert.equal(authorizationUrl.searchParams.get("include_granted_scopes"), null);
+});

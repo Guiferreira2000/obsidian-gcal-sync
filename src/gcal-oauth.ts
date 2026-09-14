@@ -50,7 +50,6 @@ export async function authorizeGoogle(
       client_id: credentials.clientId,
       code_challenge: challenge,
       code_challenge_method: "S256",
-      include_granted_scopes: "true",
       prompt: "consent",
       redirect_uri: redirectUri,
       response_type: "code",
