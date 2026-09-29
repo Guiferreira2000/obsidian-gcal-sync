@@ -27,6 +27,8 @@ export interface GcalSyncSettings {
   clientSecretSecret: string;
   refreshTokenSecret: string;
   googleAuthorizationVersion: number;
+  /** Path to a service-account JSON key outside the vault. When set, OAuth is not used. */
+  serviceAccountKeyFile: string;
   syncIntervalMinutes: number;
   timeZone: string;
   vaultId: string;
@@ -47,6 +49,7 @@ export function defaultSettings(vaultId: string): GcalSyncSettings {
     clientSecretSecret: "",
     refreshTokenSecret: "",
     googleAuthorizationVersion: 0,
+    serviceAccountKeyFile: "",
     syncIntervalMinutes: DEFAULT_SYNC_INTERVAL_MINUTES,
     timeZone: "",
     vaultId,
@@ -114,6 +117,8 @@ export class GcalSettingTab extends PluginSettingTab {
   override getControlValue(key: string): unknown {
     const settings = this.plugin.settings;
     switch (key) {
+      case "serviceAccountKeyFile":
+        return settings.serviceAccountKeyFile;
       case "timeZone":
         return settings.timeZone;
       case "syncIntervalMinutes":
@@ -134,6 +139,9 @@ export class GcalSettingTab extends PluginSettingTab {
   override async setControlValue(key: string, value: unknown): Promise<void> {
     const settings = this.plugin.settings;
     switch (key) {
+      case "serviceAccountKeyFile":
+        settings.serviceAccountKeyFile = String(value).trim();
+        break;
       case "timeZone":
         settings.timeZone = String(value).trim();
         break;
@@ -168,6 +176,15 @@ export class GcalSettingTab extends PluginSettingTab {
       type: "group",
       heading: "Google OAuth",
       items: [
+        {
+          name: "Service account key file",
+          desc: "Absolute path to a service-account JSON key, kept outside the vault. When set, the plugin signs in as that account and the OAuth settings below are ignored. Share the calendar with the account's email first.",
+          control: {
+            type: "text",
+            key: "serviceAccountKeyFile",
+            placeholder: "/path/to/service-account.json",
+          },
+        },
         {
           name: "OAuth client ID",
           desc: "Select or create an Obsidian secret containing the Desktop OAuth client ID.",

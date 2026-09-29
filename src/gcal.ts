@@ -1,3 +1,4 @@
+import { createSign } from "node:crypto";
 import { requestUrl } from "obsidian";
 import type { CalendarDateTime, VaultCalendarEvent } from "./event-parser";
 import type { GoogleEvent } from "./sync-plan";
@@ -18,6 +19,56 @@ export interface GoogleCredentials {
   clientId: string;
   clientSecret?: string;
   refreshToken: string;
+  /** When present, the plugin signs in as this service account and the OAuth fields are ignored. */
+  serviceAccount?: ServiceAccountKey;
+}
+
+/** The two fields of a Google service-account JSON key that signing in needs. */
+export interface ServiceAccountKey {
+  clientEmail: string;
+  privateKey: string;
+}
+
+const SERVICE_ACCOUNT_SCOPE = "https://www.googleapis.com/auth/calendar";
+const JWT_BEARER_GRANT = "urn:ietf:params:oauth:grant-type:jwt-bearer";
+
+/** Reads a service-account JSON key as downloaded from Google Cloud Console. */
+export function parseServiceAccountKey(json: string): ServiceAccountKey {
+  let key: { type?: unknown; client_email?: unknown; private_key?: unknown };
+  try {
+    key = JSON.parse(json);
+  } catch {
+    throw new Error("The service account key file is not valid JSON");
+  }
+  if (
+    key.type !== "service_account" ||
+    typeof key.client_email !== "string" ||
+    typeof key.private_key !== "string"
+  ) {
+    throw new Error("The service account key file is not a Google service-account key");
+  }
+  return { clientEmail: key.client_email, privateKey: key.private_key };
+}
+
+/**
+ * Signed JWT that Google exchanges for an access token (RFC 7523). Service accounts need no
+ * consent screen and no refresh token, so nothing expires or has to be authorized again.
+ */
+export function serviceAccountAssertion(key: ServiceAccountKey, now = Date.now()): string {
+  const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const issuedAt = Math.floor(now / 1000);
+  const unsigned = `${encode({ alg: "RS256", typ: "JWT" })}.${encode({
+    iss: key.clientEmail,
+    scope: SERVICE_ACCOUNT_SCOPE,
+    aud: TOKEN_ENDPOINT,
+    iat: issuedAt,
+    exp: issuedAt + 3600,
+  })}`;
+  const signature = createSign("RSA-SHA256")
+    .update(unsigned)
+    .sign(key.privateKey)
+    .toString("base64url");
+  return `${unsigned}.${signature}`;
 }
 
 export interface GoogleHttpRequest {
@@ -424,12 +475,19 @@ async function refreshAccessToken(
   credentials: GoogleCredentials,
   transport: GoogleTransport,
 ): Promise<string> {
-  const form = new URLSearchParams({
-    client_id: credentials.clientId,
-    grant_type: "refresh_token",
-    refresh_token: credentials.refreshToken,
-  });
-  if (credentials.clientSecret) form.set("client_secret", credentials.clientSecret);
+  const form = credentials.serviceAccount
+    ? new URLSearchParams({
+        grant_type: JWT_BEARER_GRANT,
+        assertion: serviceAccountAssertion(credentials.serviceAccount),
+      })
+    : new URLSearchParams({
+        client_id: credentials.clientId,
+        grant_type: "refresh_token",
+        refresh_token: credentials.refreshToken,
+      });
+  if (!credentials.serviceAccount && credentials.clientSecret) {
+    form.set("client_secret", credentials.clientSecret);
+  }
   const response = await transport({
     url: TOKEN_ENDPOINT,
     method: "POST",

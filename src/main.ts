@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   type App,
   type CachedMetadata,
@@ -30,7 +33,9 @@ import {
   type GcalGateway,
   type GcalInfo,
   type GoogleCredentials,
+  parseServiceAccountKey,
   type ReconciliationSummary,
+  type ServiceAccountKey,
   type SyncStats,
 } from "./gcal";
 import {
@@ -528,6 +533,18 @@ export default class GcalSyncPlugin extends Plugin {
   }
 
   private createClient(): GcalGateway {
+    if (this.settings.serviceAccountKeyFile) {
+      const credentials: GoogleCredentials = {
+        clientId: "",
+        refreshToken: "",
+        serviceAccount: readServiceAccountKeyFile(this.settings.serviceAccountKeyFile),
+      };
+      return this.createCalendarGateway(
+        credentials,
+        this.settings.calendarId,
+        this.settings.vaultId,
+      );
+    }
     const credentials: GoogleCredentials = {
       clientId: this.readSecret(this.settings.clientIdSecret, "OAuth client ID"),
       refreshToken: this.readSecret(this.settings.refreshTokenSecret, "refresh token"),
@@ -548,7 +565,10 @@ export default class GcalSyncPlugin extends Plugin {
   }
 
   private isConfigured(): boolean {
-    return Boolean(this.settings.clientIdSecret && this.settings.refreshTokenSecret);
+    return Boolean(
+      this.settings.serviceAccountKeyFile ||
+        (this.settings.clientIdSecret && this.settings.refreshTokenSecret),
+    );
   }
 
   private async serialize(operation: () => Promise<void>): Promise<void> {
@@ -620,4 +640,16 @@ function formatStats(stats: SyncStats): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Reads the key from outside the vault, so it never syncs to other devices or to git. */
+function readServiceAccountKeyFile(path: string): ServiceAccountKey {
+  const resolved = path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+  let json: string;
+  try {
+    json = readFileSync(resolved, "utf8");
+  } catch {
+    throw new Error(`Cannot read the service account key file at ${resolved}`);
+  }
+  return parseServiceAccountKey(json);
 }
